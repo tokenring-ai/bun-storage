@@ -26,5 +26,5 @@ export default {
       checkpointService.setCheckpointProvider(storageService);
     });
   },
-  config: packageConfigSchema,
+  configSchema: packageConfigSchema,
 } satisfies TokenRingPlugin<typeof packageConfigSchema>;
