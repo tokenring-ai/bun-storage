@@ -15,9 +15,14 @@ export default {
   displayName: "Bun Storage",
   version: packageJSON.version,
   description: packageJSON.description,
-  install(app, config) {
-    const storage = config.bunStorage;
-    const storageService = new BunStorage(storage);
+  install(_app) {
+    // Storage requires a connection string; created in reconfigure.
+  },
+  reconfigure(app, config) {
+    // connectionString is restartRequired — only create once on first configure.
+    if (app.getService(BunStorage)) return;
+
+    const storageService = new BunStorage(config.bunStorage);
     app.services.register(storageService);
     app.services.waitForItemByType(AgentCheckpointService, checkpointService => {
       checkpointService.setCheckpointProvider(storageService);
