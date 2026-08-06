@@ -1,3 +1,4 @@
+import type TokenRingApp from "@tokenring-ai/app";
 import type { ConfigFieldMeta } from "@tokenring-ai/app/config/metadata";
 import type { AppSessionCheckpoint } from "@tokenring-ai/app/schema";
 import type { TokenRingService } from "@tokenring-ai/app/types";
@@ -39,23 +40,27 @@ export type AppCheckpointRow = {
   id: number | string | bigint;
   sessionId: string;
   hostname: string;
-  projectDirectory: string;
+  workspaceDirectory: string;
   state: string | Record<string, unknown>;
   createdAt: number | string | bigint;
 };
 
 export const bunStorageConfigSchema = z
   .object({
-    connectionString: z.string().meta({
-      sensitive: true,
-      restartRequired: true,
-      description: "Database connection string (sqlite:, mysql://, postgres://)",
-    } satisfies ConfigFieldMeta),
+    connectionString: z
+      .string()
+      .optional()
+      .meta({
+        sensitive: true,
+        restartRequired: true,
+        description: "Database connection string (sqlite:, mysql://, postgres://)",
+      } satisfies ConfigFieldMeta),
     migrationsFolder: z
       .string()
       .exactOptional()
       .meta({ advanced: true, restartRequired: true, description: "Directory containing SQL migration files" } satisfies ConfigFieldMeta),
   })
+  .prefault({})
   .meta({ label: "Bun Storage", description: "SQL-backed checkpoint storage using Bun's SQL client" } satisfies ConfigFieldMeta);
 
 export function detectDatabaseDialect(connectionString: string): DatabaseDialect {
@@ -125,11 +130,13 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
   readonly sql: SQL;
   readonly displayName: string;
   readonly queries: DialectQueries;
+  //readonly config: z.infer<typeof bunStorageConfigSchema> & { connectionString: string };
 
-  constructor(readonly config: z.infer<typeof bunStorageConfigSchema>) {
-    this.dialect = detectDatabaseDialect(config.connectionString);
-    this.sql = new SQL(config.connectionString);
-    this.displayName = `Bun SQL ${this.dialect} (${sanitizedConnectionString(config.connectionString)})`;
+  constructor({ connectionString }: z.infer<typeof bunStorageConfigSchema>, app: TokenRingApp) {
+    connectionString ??= "sqlite:" + app.getWorkspaceResolvedPath("database.sqlite");
+    this.dialect = detectDatabaseDialect(connectionString);
+    this.sql = new SQL(connectionString);
+    this.displayName = `Bun SQL ${this.dialect} (${sanitizedConnectionString(connectionString)})`;
 
     switch (this.dialect) {
       case "sqlite":
@@ -185,7 +192,7 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
     const id = await this.queries.insertApp(
       checkpoint.sessionId,
       checkpoint.hostname,
-      checkpoint.projectDirectory,
+      checkpoint.workspaceDirectory,
       JSON.stringify(checkpoint.state),
       checkpoint.createdAt,
     );

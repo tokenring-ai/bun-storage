@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS `AppCheckpoints`
  `id`               bigint AUTO_INCREMENT NOT NULL,
  `sessionId`        text                  NOT NULL,
  `hostname`         text                  NOT NULL,
- `projectDirectory` text                  NOT NULL,
+ `workspaceDirectory` text                  NOT NULL,
  `state`            text                  NOT NULL,
  `createdAt`        bigint                NOT NULL,
  CONSTRAINT `AppCheckpoints_id` PRIMARY KEY (`id`)

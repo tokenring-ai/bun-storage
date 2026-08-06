@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { AppSessionCheckpoint } from "@tokenring-ai/app/schema";
+import createTestingApp from "@tokenring-ai/app/test/createTestingApp.test";
 import type { NamedAgentCheckpoint } from "@tokenring-ai/checkpoint/AgentCheckpointStorage";
 import type { BunStorage } from "./BunStorage.ts";
 
@@ -46,9 +47,12 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
     beforeAll(async () => {
       // Use dynamic import to avoid Bun SQL import errors in Node.js
       const { BunStorage } = await import("./BunStorage.js");
-      storage = new BunStorage({
-        connectionString: `sqlite://${dbPath}`,
-      });
+      storage = new BunStorage(
+        {
+          connectionString: `sqlite://${dbPath}`,
+        },
+        createTestingApp(),
+      );
       await storage.start();
     });
 
@@ -173,9 +177,12 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
     beforeAll(async () => {
       // Use dynamic import to avoid Bun SQL import errors in Node.js
       const { BunStorage } = await import("./BunStorage.js");
-      storage = new BunStorage({
-        connectionString: `sqlite://${dbPath}`,
-      });
+      storage = new BunStorage(
+        {
+          connectionString: `sqlite://${dbPath}`,
+        },
+        createTestingApp(),
+      );
       await storage.start();
     });
 
@@ -192,7 +199,7 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
       const checkpoint: AppSessionCheckpoint = {
         sessionId: "app-session-1",
         hostname: "localhost",
-        projectDirectory: "/test/project",
+        workspaceDirectory: "/test/project",
         state: { activeTools: ["tool1"], settings: { theme: "dark" } },
         createdAt: Date.now(),
       };
@@ -205,7 +212,7 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
       expect(retrieved).toBeDefined();
       expect(retrieved?.sessionId).toBe(checkpoint.sessionId);
       expect(retrieved?.hostname).toBe(checkpoint.hostname);
-      expect(retrieved?.projectDirectory).toBe(checkpoint.projectDirectory);
+      expect(retrieved?.workspaceDirectory).toBe(checkpoint.workspaceDirectory);
       expect(retrieved?.state).toEqual(checkpoint.state);
     });
 
@@ -216,7 +223,7 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
         expect(list[0]).toHaveProperty("id");
         expect(list[0]).toHaveProperty("sessionId");
         expect(list[0]).toHaveProperty("hostname");
-        expect(list[0]).toHaveProperty("projectDirectory");
+        expect(list[0]).toHaveProperty("workspaceDirectory");
         expect(list[0]).toHaveProperty("createdAt");
       }
     });
@@ -230,7 +237,7 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
       const checkpoint1: AppSessionCheckpoint = {
         sessionId: "app-session-1",
         hostname: "localhost",
-        projectDirectory: "/test/project",
+        workspaceDirectory: "/test/project",
         state: { activeTools: ["tool1"] },
         createdAt: Date.now() - 1000,
       };
@@ -238,7 +245,7 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
       const checkpoint2: AppSessionCheckpoint = {
         sessionId: "app-session-2",
         hostname: "localhost",
-        projectDirectory: "/test/project",
+        workspaceDirectory: "/test/project",
         state: { activeTools: ["tool2"] },
         createdAt: Date.now(),
       };
@@ -278,7 +285,7 @@ describe("BunAgentStateStorage - MySQL & PostgreSQL", () => {
 
   async function assertStoreAndRetrieve(connectionString: string) {
     const { BunStorage } = await import("./BunStorage.ts");
-    const storage = new BunStorage({ connectionString });
+    const storage = new BunStorage({ connectionString }, createTestingApp());
     try {
       await storage.start();
 

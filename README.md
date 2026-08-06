@@ -268,7 +268,7 @@ Stores application session checkpoint data for TokenRing apps.
 | `id`               | Integer/BIGINT | Auto-increment primary key    |
 | `sessionId`        | TEXT           | Session identifier            |
 | `hostname`         | TEXT           | Hostname of the app instance  |
-| `projectDirectory` | TEXT           | Project directory path        |
+| `workspaceDirectory` | TEXT           | Project directory path        |
 | `state`            | TEXT           | JSON-serialized state payload |
 | `createdAt`        | Integer/BIGINT | Unix timestamp                |
 
@@ -366,7 +366,7 @@ type AppCheckpointRow = {
   id: number | string | bigint;
   sessionId: string;
   hostname: string;
-  projectDirectory: string;
+  workspaceDirectory: string;
   state: string | Record<string, unknown>;
   createdAt: number | string | bigint;
 };

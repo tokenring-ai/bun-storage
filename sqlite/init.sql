@@ -11,10 +11,11 @@ CREATE TABLE IF NOT EXISTS "AgentCheckpoints"
 
 CREATE TABLE IF NOT EXISTS "AppCheckpoints"
 (
- "id"               integer PRIMARY KEY AUTOINCREMENT NOT NULL,
- "sessionId"        text                              NOT NULL,
- "hostname"         text                              NOT NULL,
- "projectDirectory" text                              NOT NULL,
- "state"            text                              NOT NULL,
- "createdAt"        integer                           NOT NULL
+ "id"                 integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+ "sessionId"          text                              NOT NULL,
+ "hostname"           text                              NOT NULL,
+ "workspaceDirectory" text                              NOT NULL,
+ "state"              text                              NOT NULL,
+ "createdAt"          integer                           NOT NULL
 );
+

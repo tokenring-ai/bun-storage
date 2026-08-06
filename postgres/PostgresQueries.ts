@@ -25,10 +25,10 @@ export class PostgresQueries {
     return typeof id === "number" ? id : typeof id === "bigint" ? Number(id) : Number.parseInt(id, 10);
   }
 
-  async insertApp(sessionId: string, hostname: string, projectDirectory: string, state: string, createdAt: number): Promise<number> {
+  async insertApp(sessionId: string, hostname: string, workspaceDirectory: string, state: string, createdAt: number): Promise<number> {
     const result = await this.sql.unsafe<{ id: number | string | bigint }[]>(
-      'INSERT INTO "AppCheckpoints" ("sessionId", "hostname", "projectDirectory", "state", "createdAt") VALUES ($1, $2, $3, $4, $5) RETURNING "id"',
-      [sessionId, hostname, projectDirectory, state, createdAt],
+      'INSERT INTO "AppCheckpoints" ("sessionId", "hostname", "workspaceDirectory", "state", "createdAt") VALUES ($1, $2, $3, $4, $5) RETURNING "id"',
+      [sessionId, hostname, workspaceDirectory, state, createdAt],
     );
     const row = result[0];
     if (!row) throw new Error("No data returned from database");
@@ -54,7 +54,7 @@ export class PostgresQueries {
 
   async listApps(): Promise<Omit<AppCheckpointRow, "state">[]> {
     return await this.sql.unsafe<Omit<AppCheckpointRow, "state">[]>(
-      'SELECT "id", "sessionId", "hostname", "projectDirectory", "createdAt" FROM "AppCheckpoints" ORDER BY "createdAt" DESC',
+      'SELECT "id", "sessionId", "hostname", "workspaceDirectory", "createdAt" FROM "AppCheckpoints" ORDER BY "createdAt" DESC',
     );
   }
 
