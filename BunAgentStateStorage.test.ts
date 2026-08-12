@@ -95,12 +95,16 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
 
     it("should list checkpoints", async () => {
       const list = await storage.listAgentCheckpoints();
-      expect(Array.isArray(list)).toBe(true);
-      if (list.length > 0) {
-        expect(list[0]).toHaveProperty("id");
-        expect(list[0]).toHaveProperty("name");
-        expect(list[0]).toHaveProperty("agentId");
-        expect(list[0]).toHaveProperty("createdAt");
+      expect(Array.isArray(list.items)).toBe(true);
+      expect(typeof list.total).toBe("number");
+      expect(typeof list.hasMore).toBe("boolean");
+      expect(list.limit).toBe(50);
+      expect(list.offset).toBe(0);
+      if (list.items.length > 0) {
+        expect(list.items[0]).toHaveProperty("id");
+        expect(list.items[0]).toHaveProperty("name");
+        expect(list.items[0]).toHaveProperty("agentId");
+        expect(list.items[0]).toHaveProperty("createdAt");
       }
     });
 
@@ -168,6 +172,243 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
 
       expect(retrieved?.state).toEqual(complexState);
     });
+
+    it("should store, retrieve, list, upsert, and delete agent metrics", async () => {
+      const agentId = "metrics-agent-1";
+      await storage.storeAgentMetrics({
+        agentId,
+        updatedAt: Date.now(),
+        metrics: {
+          costs: { Chat: 0.12 },
+          tokens: {
+            totalInputTokens: 100,
+            totalOutputTokens: 40,
+            totalCachedTokens: 5,
+            totalReasoningTokens: 2,
+          },
+          tokensByCategory: {
+            Chat: {
+              totalInputTokens: 100,
+              totalOutputTokens: 40,
+              totalCachedTokens: 5,
+              totalReasoningTokens: 2,
+            },
+          },
+          latency: {
+            requestCount: 2,
+            totalElapsedMs: 300,
+            totalTimeToFirstTokenMs: 50,
+            timeToFirstTokenCount: 1,
+            totalTokensPerSecond: 40,
+            tokensPerSecondCount: 1,
+            recentElapsedMs: [100, 200],
+            recentTimeToFirstTokenMs: [50],
+          },
+          errors: {
+            errorsByProvider: { openai: 1 },
+            errorsByType: { timeout: 1 },
+            retryCount: 1,
+          },
+          activity: {
+            totalSteps: 4,
+            totalToolCalls: 3,
+            toolCallsByName: { read_file: 3 },
+          },
+        },
+      });
+
+      const retrieved = await storage.retrieveAgentMetrics(agentId);
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.metrics.costs.Chat).toBe(0.12);
+      expect(retrieved?.metrics.tokens.totalInputTokens).toBe(100);
+      expect(retrieved?.metrics.activity.totalSteps).toBe(4);
+
+      await storage.storeAgentMetrics({
+        agentId,
+        updatedAt: Date.now() + 1,
+        metrics: {
+          ...retrieved!.metrics,
+          costs: { Chat: 0.25 },
+        },
+      });
+
+      const upserted = await storage.retrieveAgentMetrics(agentId);
+      expect(upserted?.metrics.costs.Chat).toBe(0.25);
+
+      const listed = await storage.listAgentMetrics();
+      expect(listed.some(row => row.agentId === agentId)).toBe(true);
+      const summary = listed.find(row => row.agentId === agentId);
+      expect(summary?.totalCost).toBe(0.25);
+      expect(summary?.totalInputTokens).toBe(100);
+
+      await storage.deleteAgentMetrics(agentId);
+      expect(await storage.retrieveAgentMetrics(agentId)).toBeNull();
+    });
+
+    it("should filter and paginate agent checkpoints", async () => {
+      const base = Date.now();
+      for (let i = 0; i < 5; i++) {
+        await storage.storeAgentCheckpoint({
+          agentId: i < 3 ? "filter-agent-a" : "filter-agent-b",
+          sessionId: i % 2 === 0 ? "sess-even" : "sess-odd",
+          agentType: i < 3 ? "general" : "specialized",
+          name: `page-cp-${i}`,
+          state: { n: i },
+          createdAt: base + i,
+        });
+      }
+
+      const page1 = await storage.listAgentCheckpoints({
+        agentId: "filter-agent-a",
+        limit: 2,
+        offset: 0,
+        orderBy: "createdAt",
+        orderDir: "DESC",
+      });
+      expect(page1.total).toBe(3);
+      expect(page1.items).toHaveLength(2);
+      expect(page1.hasMore).toBe(true);
+      expect(page1.limit).toBe(2);
+      expect(page1.offset).toBe(0);
+      expect(page1.items.every(i => i.agentId === "filter-agent-a")).toBe(true);
+
+      const page2 = await storage.listAgentCheckpoints({
+        agentId: "filter-agent-a",
+        limit: 2,
+        offset: 2,
+      });
+      expect(page2.items).toHaveLength(1);
+      expect(page2.hasMore).toBe(false);
+
+      const bySession = await storage.listAgentCheckpoints({ sessionId: "sess-even", limit: 50 });
+      expect(bySession.items.every(i => i.sessionId === "sess-even")).toBe(true);
+      expect(bySession.total).toBeGreaterThanOrEqual(3);
+
+      const byType = await storage.listAgentCheckpoints({ agentType: "specialized", limit: 50 });
+      expect(byType.items.every(i => i.agentType === "specialized")).toBe(true);
+
+      const after = await storage.listAgentCheckpoints({ after: base + 2, limit: 50 });
+      expect(after.items.every(i => i.createdAt > base + 2)).toBe(true);
+
+      const before = await storage.listAgentCheckpoints({ before: base + 2, agentId: "filter-agent-a", limit: 50 });
+      expect(before.items.every(i => i.createdAt < base + 2)).toBe(true);
+    });
+
+    it("should prune data according to retention policies", async () => {
+      const retainDbPath = "./test-agent-retention.db";
+      const { unlinkSync, existsSync } = await import("node:fs");
+      if (existsSync(retainDbPath)) unlinkSync(retainDbPath);
+
+      const { BunStorage } = await import("./BunStorage.js");
+      const seed = new BunStorage({ connectionString: `sqlite://${retainDbPath}` }, createTestingApp());
+      await seed.start();
+
+      const now = Date.now();
+      const day = 86_400_000;
+
+      for (let i = 0; i < 4; i++) {
+        await seed.storeAgentCheckpoint({
+          agentId: "retain-agent",
+          sessionId: "retain-sess",
+          agentType: "general",
+          name: `retain-${i}`,
+          state: { i },
+          createdAt: now - (3 - i) * day,
+        });
+      }
+
+      await seed.storeAgentCheckpoint({
+        agentId: "old-agent",
+        sessionId: "old-sess",
+        agentType: "general",
+        name: "very-old",
+        state: { old: true },
+        createdAt: now - 60 * day,
+      });
+
+      await seed.storeAppCheckpoint({
+        sessionId: "old-app",
+        hostname: "host",
+        workspaceDirectory: "/tmp",
+        state: {},
+        createdAt: now - 120 * day,
+      });
+      await seed.storeAppCheckpoint({
+        sessionId: "new-app",
+        hostname: "host",
+        workspaceDirectory: "/tmp",
+        state: {},
+        createdAt: now,
+      });
+
+      const emptyMetrics = {
+        costs: {},
+        tokens: { totalInputTokens: 0, totalOutputTokens: 0, totalCachedTokens: 0, totalReasoningTokens: 0 },
+        tokensByCategory: {},
+        latency: {
+          requestCount: 0,
+          totalElapsedMs: 0,
+          totalTimeToFirstTokenMs: 0,
+          timeToFirstTokenCount: 0,
+          totalTokensPerSecond: 0,
+          tokensPerSecondCount: 0,
+          recentElapsedMs: [] as number[],
+          recentTimeToFirstTokenMs: [] as number[],
+        },
+        errors: { errorsByProvider: {}, errorsByType: {}, retryCount: 0 },
+        activity: { totalSteps: 0, totalToolCalls: 0, toolCallsByName: {} },
+      };
+
+      await seed.storeAgentMetrics({
+        agentId: "old-metrics",
+        updatedAt: now - 90 * day,
+        metrics: emptyMetrics,
+      });
+      await seed.storeAgentMetrics({
+        agentId: "fresh-metrics",
+        updatedAt: now,
+        metrics: { ...emptyMetrics, tokens: { ...emptyMetrics.tokens, totalInputTokens: 1 } },
+      });
+      await seed.stop();
+
+      const retained = new BunStorage(
+        {
+          connectionString: `sqlite://${retainDbPath}`,
+          retention: {
+            agentCheckpoints: { maxAge: "30d", maxPerAgent: 2, keepLatest: true },
+            appCheckpoints: { maxAge: "90d", maxTotal: 1000 },
+            agentMetrics: { maxAge: "60d" },
+          },
+        },
+        createTestingApp(),
+      );
+      try {
+        await retained.start();
+
+        const agentList = await retained.listAgentCheckpoints({ agentId: "retain-agent", limit: 50 });
+        expect(agentList.total).toBe(2);
+        expect(agentList.items.every(i => i.agentId === "retain-agent")).toBe(true);
+
+        const oldAgent = await retained.listAgentCheckpoints({ agentId: "old-agent", limit: 50 });
+        // keepLatest preserves the single latest (even if older than maxAge)
+        expect(oldAgent.total).toBe(1);
+
+        const apps = await retained.listAppCheckpoints({ limit: 50 });
+        expect(apps.items.some(a => a.sessionId === "old-app")).toBe(false);
+        expect(apps.items.some(a => a.sessionId === "new-app")).toBe(true);
+
+        expect(await retained.retrieveAgentMetrics("old-metrics")).toBeNull();
+        expect(await retained.retrieveAgentMetrics("fresh-metrics")).not.toBeNull();
+
+        const stats = await retained.cleanup();
+        expect(stats.agentCheckpointsDeleted).toBe(0);
+        expect(stats.appCheckpointsDeleted).toBe(0);
+        expect(stats.agentMetricsDeleted).toBe(0);
+      } finally {
+        await retained.stop();
+        if (existsSync(retainDbPath)) unlinkSync(retainDbPath);
+      }
+    });
   });
 
   describe("SQLite App Checkpoint Storage", () => {
@@ -218,13 +459,14 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
 
     it("should list app checkpoints", async () => {
       const list = await storage.listAppCheckpoints();
-      expect(Array.isArray(list)).toBe(true);
-      if (list.length > 0) {
-        expect(list[0]).toHaveProperty("id");
-        expect(list[0]).toHaveProperty("sessionId");
-        expect(list[0]).toHaveProperty("hostname");
-        expect(list[0]).toHaveProperty("workspaceDirectory");
-        expect(list[0]).toHaveProperty("createdAt");
+      expect(Array.isArray(list.items)).toBe(true);
+      expect(typeof list.total).toBe("number");
+      if (list.items.length > 0) {
+        expect(list.items[0]).toHaveProperty("id");
+        expect(list.items[0]).toHaveProperty("sessionId");
+        expect(list.items[0]).toHaveProperty("hostname");
+        expect(list.items[0]).toHaveProperty("workspaceDirectory");
+        expect(list.items[0]).toHaveProperty("createdAt");
       }
     });
 
@@ -302,7 +544,7 @@ describe("BunAgentStateStorage - MySQL & PostgreSQL", () => {
       expect(retrieved?.agentType).toBe(sampleCheckpoint.agentType);
 
       const list = await storage.listAgentCheckpoints();
-      expect(list.some(item => item.id === id)).toBe(true);
+      expect(list.items.some(item => item.id === id)).toBe(true);
 
       const missing = await storage.retrieveAgentCheckpoint(999_999_999);
       expect(missing).toBeNull();

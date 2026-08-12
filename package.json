@@ -5,6 +5,7 @@
   "dependencies": {
     "@tokenring-ai/app": "workspace:*",
     "@tokenring-ai/checkpoint": "workspace:*",
+    "@tokenring-ai/metrics": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {

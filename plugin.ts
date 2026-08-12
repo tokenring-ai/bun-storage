@@ -1,6 +1,7 @@
 import type { TokenRingPlugin } from "@tokenring-ai/app";
 import AgentCheckpointService from "@tokenring-ai/checkpoint/AgentCheckpointService";
 import AppCheckpointService from "@tokenring-ai/checkpoint/AppCheckpointService";
+import MetricsService from "@tokenring-ai/metrics/MetricsService";
 import type { ZodNever } from "zod";
 import { z } from "zod";
 import { BunStorage } from "./BunStorage.ts";
@@ -24,6 +25,9 @@ export default {
     });
     app.waitForService(AppCheckpointService, checkpointService => {
       checkpointService.setCheckpointProvider(storageService);
+    });
+    app.waitForService(MetricsService, metricsService => {
+      metricsService.setMetricsProvider(storageService);
     });
   },
   immutableConfigSchema: packageConfigSchema,
