@@ -104,11 +104,15 @@ export function detectDatabaseDialect(connectionString: string): DatabaseDialect
 function sanitizedConnectionString(connectionString: string): string {
   try {
     const url = new URL(connectionString);
-    if (url.password) url.password = "***";
-    return url.toString();
+    if (url.password) {
+      url.password = "***";
+      return url.toString();
+    }
   } catch {
-    return connectionString;
+    // Non-URL DSNs and malformed strings fall through to regex masking.
   }
+  // Mask user:password@host whether or not a scheme:// prefix is present.
+  return connectionString.replace(/(\/\/)?([^:/?#\s]+):([^@/\s]+)@/, "$1$2:***@");
 }
 
 function toNumber(value: number | string | bigint): number {
@@ -168,9 +172,11 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
   private readonly app: TokenRingApp;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private cleanupRunning = false;
+  private cleanupInFlight: Promise<void> | null = null;
+  private closed = false;
 
   constructor(config: z.infer<typeof bunStorageConfigSchema>, app: TokenRingApp) {
-    let connectionString = config.connectionString;
+    let connectionString = config.connectionString?.trim() || undefined;
     connectionString ??= "sqlite:" + app.getWorkspaceResolvedPath("database.sqlite");
     this.dialect = detectDatabaseDialect(connectionString);
     this.sql = new SQL(connectionString);
@@ -208,9 +214,14 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
   }
 
   async stop() {
+    if (this.closed) return;
+    this.closed = true;
     if (this.cleanupTimer != null) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
+    }
+    if (this.cleanupInFlight) {
+      await this.cleanupInFlight;
     }
     await this.sql.close();
   }
@@ -233,15 +244,33 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
   }
 
   private async runScheduledCleanup(): Promise<void> {
-    if (this.cleanupRunning) return;
+    if (this.closed || this.cleanupRunning) return;
     this.cleanupRunning = true;
+    this.cleanupInFlight = this.executeScheduledCleanup();
+    try {
+      await this.cleanupInFlight;
+    } finally {
+      this.cleanupRunning = false;
+      this.cleanupInFlight = null;
+    }
+  }
+
+  private async executeScheduledCleanup(): Promise<void> {
+    if (this.closed) return;
     try {
       const stats = await this.cleanup();
       this.logCleanupStats(stats, "scheduled");
     } catch (error) {
       this.app.serviceError(this, "Scheduled retention cleanup failed:", error);
-    } finally {
-      this.cleanupRunning = false;
+    }
+  }
+
+  private async applyCleanupPolicy(label: string, run: () => Promise<{ deleted: number; bytes: number }>): Promise<{ deleted: number; bytes: number }> {
+    try {
+      return await run();
+    } catch (error) {
+      this.app.serviceError(this, `${label} cleanup failed:`, error);
+      return { deleted: 0, bytes: 0 };
     }
   }
 
@@ -277,12 +306,13 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
       if (agentCfg.maxAge) {
         const cutoff = now - parseDurationMs(agentCfg.maxAge);
         const keepLatest = agentCfg.keepLatest ?? true;
-        const result = await this.queries.deleteAgentCheckpointsOlderThan(cutoff, keepLatest);
+        const result = await this.applyCleanupPolicy("Agent checkpoint maxAge", () => this.queries.deleteAgentCheckpointsOlderThan(cutoff, keepLatest));
         stats.agentCheckpointsDeleted += result.deleted;
         stats.spaceFreedBytes += result.bytes;
       }
       if (agentCfg.maxPerAgent != null) {
-        const result = await this.queries.deleteAgentCheckpointsBeyondPerAgent(agentCfg.maxPerAgent);
+        const maxPerAgent = agentCfg.maxPerAgent;
+        const result = await this.applyCleanupPolicy("Agent checkpoint maxPerAgent", () => this.queries.deleteAgentCheckpointsBeyondPerAgent(maxPerAgent));
         stats.agentCheckpointsDeleted += result.deleted;
         stats.spaceFreedBytes += result.bytes;
       }
@@ -292,12 +322,13 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
     if (appCfg) {
       if (appCfg.maxAge) {
         const cutoff = now - parseDurationMs(appCfg.maxAge);
-        const result = await this.queries.deleteAppCheckpointsOlderThan(cutoff);
+        const result = await this.applyCleanupPolicy("App checkpoint maxAge", () => this.queries.deleteAppCheckpointsOlderThan(cutoff));
         stats.appCheckpointsDeleted += result.deleted;
         stats.spaceFreedBytes += result.bytes;
       }
       if (appCfg.maxTotal != null) {
-        const result = await this.queries.deleteAppCheckpointsBeyondTotal(appCfg.maxTotal);
+        const maxTotal = appCfg.maxTotal;
+        const result = await this.applyCleanupPolicy("App checkpoint maxTotal", () => this.queries.deleteAppCheckpointsBeyondTotal(maxTotal));
         stats.appCheckpointsDeleted += result.deleted;
         stats.spaceFreedBytes += result.bytes;
       }
@@ -306,7 +337,7 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
     const metricsCfg = retention.agentMetrics;
     if (metricsCfg?.maxAge) {
       const cutoff = now - parseDurationMs(metricsCfg.maxAge);
-      const result = await this.queries.deleteAgentMetricsOlderThan(cutoff);
+      const result = await this.applyCleanupPolicy("Agent metrics maxAge", () => this.queries.deleteAgentMetricsOlderThan(cutoff));
       stats.agentMetricsDeleted += result.deleted;
       stats.spaceFreedBytes += result.bytes;
     }

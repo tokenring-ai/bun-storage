@@ -18,7 +18,7 @@ export default {
   version: packageJSON.version,
   description: packageJSON.description,
   earlyInstall(app, config) {
-    const storageService = app.addService(new BunStorage(config.bunStorage, app));
+    const storageService = app.addService(BunStorage, new BunStorage(config.bunStorage, app));
 
     app.waitForService(AgentCheckpointService, checkpointService => {
       checkpointService.setCheckpointProvider(storageService);

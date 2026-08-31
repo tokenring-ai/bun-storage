@@ -1,10 +1,5 @@
 import { z } from "zod";
 
-/** Duration strings like "30d", "1h", "15m", "60s", "500ms". */
-export const DurationStringSchema = z.string().regex(/^\d+(ms|s|m|h|d)$/, 'Expected duration like "30d", "1h", "15m", "60s", or "500ms"');
-
-export type DurationString = z.infer<typeof DurationStringSchema>;
-
 const UNIT_MS: Record<string, number> = {
   ms: 1,
   s: 1_000,
@@ -20,8 +15,30 @@ export function parseDurationMs(value: string): number {
   }
   const amount = Number.parseInt(match[1]!, 10);
   const unit = match[2]!;
-  return amount * UNIT_MS[unit]!;
+  const factor = UNIT_MS[unit]!;
+  if (!Number.isSafeInteger(amount) || amount > Number.MAX_SAFE_INTEGER / factor) {
+    throw new Error(`Duration "${value}" exceeds safe integer range`);
+  }
+  return amount * factor;
 }
+
+/** Duration strings like "30d", "1h", "15m", "60s", "500ms". */
+export const DurationStringSchema = z
+  .string()
+  .regex(/^\d+(ms|s|m|h|d)$/, 'Expected duration like "30d", "1h", "15m", "60s", or "500ms"')
+  .refine(
+    value => {
+      try {
+        parseDurationMs(value);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "Duration exceeds safe integer range" },
+  );
+
+export type DurationString = z.infer<typeof DurationStringSchema>;
 
 export const AgentCheckpointRetentionSchema = z
   .object({
@@ -55,7 +72,7 @@ export const RetentionConfigSchema = z
   })
   .optional();
 
-export type RetentionConfig = z.input<typeof RetentionConfigSchema>;
+export type RetentionConfig = z.infer<typeof RetentionConfigSchema>;
 
 export type CleanupStats = {
   agentCheckpointsDeleted: number;

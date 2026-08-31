@@ -501,6 +501,153 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
       expect(latest?.id).toBe(id2);
     });
   });
+
+  describe("constructor, lifecycle, and cleanup isolation", () => {
+    it("treats an empty connection string as missing and defaults to sqlite", async () => {
+      const { BunStorage } = await import("./BunStorage.js");
+      const storage = new BunStorage({ connectionString: "" }, createTestingApp());
+      try {
+        expect(storage.dialect).toBe("sqlite");
+        expect(storage.displayName).toContain("sqlite:");
+      } finally {
+        await storage.stop();
+        const { unlinkSync, existsSync } = await import("node:fs");
+        if (existsSync("/tmp/database.sqlite")) unlinkSync("/tmp/database.sqlite");
+      }
+    });
+
+    it("masks passwords in connection-string display names", async () => {
+      const { BunStorage } = await import("./BunStorage.js");
+      const urlStorage = new BunStorage({ connectionString: "sqlite://user:s3cret@./test-mask-url.db" }, createTestingApp());
+      try {
+        expect(urlStorage.displayName).not.toContain("s3cret");
+        expect(urlStorage.displayName).toContain("***");
+      } finally {
+        await urlStorage.stop();
+        const { unlinkSync, existsSync } = await import("node:fs");
+        if (existsSync("./test-mask-url.db")) unlinkSync("./test-mask-url.db");
+      }
+    });
+
+    it("allows stop() to be called more than once", async () => {
+      const { BunStorage } = await import("./BunStorage.js");
+      const dbPath = "./test-stop-idempotent.db";
+      const { unlinkSync, existsSync } = await import("node:fs");
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+      const storage = new BunStorage({ connectionString: `sqlite://${dbPath}` }, createTestingApp());
+      await storage.start();
+      await storage.stop();
+      await storage.stop();
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+    });
+
+    it("waits for an in-progress scheduled cleanup before closing", async () => {
+      const { BunStorage } = await import("./BunStorage.js");
+      const dbPath = "./test-stop-wait.db";
+      const { unlinkSync, existsSync } = await import("node:fs");
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+
+      const storage = new BunStorage(
+        {
+          connectionString: `sqlite://${dbPath}`,
+          retention: { agentCheckpoints: { maxAge: "1d" } },
+        },
+        createTestingApp(),
+      );
+      await storage.start();
+
+      let cleanupStarted = false;
+      let release!: (value: { deleted: number; bytes: number }) => void;
+      const gate = new Promise<{ deleted: number; bytes: number }>(resolve => {
+        release = resolve;
+      });
+      storage.queries.deleteAgentCheckpointsOlderThan = async () => {
+        cleanupStarted = true;
+        return gate;
+      };
+
+      const scheduled = (storage as unknown as { runScheduledCleanup: () => Promise<void> }).runScheduledCleanup();
+      while (!cleanupStarted) {
+        await new Promise(resolve => setTimeout(resolve, 1));
+      }
+
+      let stopped = false;
+      const stopping = storage.stop().then(() => {
+        stopped = true;
+      });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(stopped).toBe(false);
+
+      release({ deleted: 0, bytes: 0 });
+      await scheduled;
+      await stopping;
+      expect(stopped).toBe(true);
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+    });
+
+    it("continues remaining retention policies when one policy fails", async () => {
+      const { BunStorage } = await import("./BunStorage.js");
+      const dbPath = "./test-cleanup-isolation.db";
+      const { unlinkSync, existsSync } = await import("node:fs");
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+
+      const storage = new BunStorage(
+        {
+          connectionString: `sqlite://${dbPath}`,
+          retention: {
+            agentCheckpoints: { maxAge: "1d" },
+            appCheckpoints: { maxAge: "1d" },
+            agentMetrics: { maxAge: "1d" },
+          },
+        },
+        createTestingApp(),
+      );
+      await storage.start();
+
+      const now = Date.now();
+      const day = 86_400_000;
+      await storage.storeAppCheckpoint({
+        sessionId: "old-app",
+        hostname: "host",
+        workspaceDirectory: "/tmp",
+        state: {},
+        createdAt: now - 10 * day,
+      });
+      await storage.storeAgentMetrics({
+        agentId: "old-metrics",
+        updatedAt: now - 10 * day,
+        metrics: {
+          costs: {},
+          tokens: { totalInputTokens: 0, totalOutputTokens: 0, totalCachedTokens: 0, totalReasoningTokens: 0 },
+          tokensByCategory: {},
+          latency: {
+            requestCount: 0,
+            totalElapsedMs: 0,
+            totalTimeToFirstTokenMs: 0,
+            timeToFirstTokenCount: 0,
+            totalTokensPerSecond: 0,
+            tokensPerSecondCount: 0,
+            recentElapsedMs: [],
+            recentTimeToFirstTokenMs: [],
+          },
+          errors: { errorsByProvider: {}, errorsByType: {}, retryCount: 0 },
+          activity: { totalSteps: 0, totalToolCalls: 0, toolCallsByName: {} },
+        },
+      });
+
+      storage.queries.deleteAgentCheckpointsOlderThan = async () => {
+        throw new Error("maxAge failed");
+      };
+
+      const stats = await storage.cleanup();
+      expect(stats.appCheckpointsDeleted).toBe(1);
+      expect(stats.agentMetricsDeleted).toBe(1);
+      expect(await storage.retrieveAgentMetrics("old-metrics")).toBeNull();
+
+      await storage.stop();
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+    });
+  });
 });
 
 describe("BunAgentStateStorage - MySQL & PostgreSQL", () => {
