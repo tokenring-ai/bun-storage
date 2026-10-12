@@ -245,6 +245,29 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
       expect(await storage.retrieveAgentMetrics(agentId)).toBeNull();
     });
 
+    it("should list full stored metrics with spend history and identity", async () => {
+      const agentId = "metrics-agent-history";
+      await storage.storeAgentMetrics({
+        agentId,
+        updatedAt: Date.now(),
+        metrics: {
+          costs: { Chat: 0.5 },
+          spendHistory: { fine: [], hourly: [{ t: 3_600_000, cost: 0.5, inputTokens: 10, outputTokens: 5, requests: 1 }] },
+          identity: { displayName: "Historian", agentType: "research" },
+        },
+      });
+
+      const all = await storage.listAllAgentMetrics();
+      const record = all.find(row => row.agentId === agentId);
+      expect(record?.metrics.spendHistory.hourly[0]?.cost).toBe(0.5);
+      expect(record?.metrics.identity?.displayName).toBe("Historian");
+
+      const listed = await storage.listAgentMetrics();
+      expect(listed.find(row => row.agentId === agentId)?.displayName).toBe("Historian");
+
+      await storage.deleteAgentMetrics(agentId);
+    });
+
     it("should filter and paginate agent checkpoints", async () => {
       const base = Date.now();
       for (let i = 0; i < 5; i++) {

@@ -286,6 +286,7 @@ The main storage class implementing `TokenRingService`, `AgentCheckpointStorage`
 | `storeAgentMetrics(data)`       | Upsert aggregated metrics for an agent (keyed by `agentId`)       |
 | `retrieveAgentMetrics(agentId)` | Retrieve stored metrics for an agent, or `null`                   |
 | `listAgentMetrics()`            | List summary rows for every agent with stored metrics             |
+| `listAllAgentMetrics()`         | Full stored metrics (incl. spend history) for every agent         |
 | `deleteAgentMetrics(agentId)`   | Remove stored metrics for an agent                                |
 
 **List options.** Both list methods accept `CheckpointListOptions` (defined in `@tokenring-ai/checkpoint`) — `sessionId`, `agentId`, `agentType`, `limit` (default 50), `offset`, `before`/`after` (millisecond `createdAt` bounds), `orderBy` (`"createdAt"` default \| `"id"`), `orderDir` (`"DESC"` default \| `"ASC"`) — and return `PaginatedResult<T>` (`{ items, total, hasMore, limit, offset }`). `listAppCheckpoints` ignores the `agentId` and `agentType` filters, since app rows carry no agent identity.

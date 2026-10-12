@@ -23,9 +23,9 @@ import {
   type AgentMetrics,
   AgentMetricsDataSchema,
   type AgentMetricsListItem,
+  AgentMetricsSchema,
   type MetricsStorage,
   type StoredAgentMetrics,
-  StoredAgentMetricsSchema,
   toAgentMetricsListItem,
 } from "@tokenring-ai/metrics/MetricsStorage";
 import { SQL } from "bun";
@@ -150,7 +150,7 @@ function normalizeAppCheckpointRow(row: AppCheckpointRow): StoredAppCheckpoint {
 }
 
 function normalizeAgentMetricsRow(row: AgentMetricsRow): StoredAgentMetrics {
-  return StoredAgentMetricsSchema.parse({
+  return AgentMetricsSchema.parse({
     agentId: row.agentId,
     metrics: AgentMetricsDataSchema.parse(parseStoredState(row.metrics)),
     updatedAt: toNumber(row.updatedAt),
@@ -425,7 +425,7 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
   }
 
   async storeAgentMetrics(data: AgentMetrics): Promise<void> {
-    const parsed = StoredAgentMetricsSchema.parse(data);
+    const parsed = AgentMetricsSchema.parse(data);
     await this.queries.upsertAgentMetrics(parsed.agentId, JSON.stringify(parsed.metrics), parsed.updatedAt);
   }
 
@@ -441,6 +441,11 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
       const stored = normalizeAgentMetricsRow(row);
       return toAgentMetricsListItem(stored.agentId, stored.metrics, stored.updatedAt);
     });
+  }
+
+  async listAllAgentMetrics(): Promise<StoredAgentMetrics[]> {
+    const rows = await this.queries.listAgentMetrics();
+    return rows.map(normalizeAgentMetricsRow);
   }
 
   async deleteAgentMetrics(agentId: string): Promise<void> {
