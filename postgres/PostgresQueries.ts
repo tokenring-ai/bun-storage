@@ -18,10 +18,18 @@ export class PostgresQueries {
     }
   }
 
-  async insertAgent(agentId: string, sessionId: string, name: string, agentType: string, state: string, createdAt: number): Promise<number> {
+  async insertAgent(
+    agentId: string,
+    sessionId: string,
+    name: string,
+    agentType: string,
+    state: string,
+    createdAt: number,
+    parentAgentId: string | null,
+  ): Promise<number> {
     const result = await this.sql.unsafe<{ id: number | string | bigint }[]>(
-      'INSERT INTO "AgentCheckpoints" ("agentId", "sessionId", "name", "agentType", "state", "createdAt") VALUES ($1, $2, $3, $4, $5, $6) RETURNING "id"',
-      [agentId, sessionId, name, agentType, state, createdAt],
+      'INSERT INTO "AgentCheckpoints" ("agentId", "sessionId", "name", "agentType", "state", "createdAt", "parentAgentId") VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING "id"',
+      [agentId, sessionId, name, agentType, state, createdAt, parentAgentId],
     );
     const row = result[0];
     if (!row) throw new Error("No data returned from database");
@@ -79,7 +87,7 @@ export class PostgresQueries {
   }
 
   async latestApp(): Promise<AppCheckpointRow | null> {
-    const rows = await this.sql.unsafe<AppCheckpointRow[]>('SELECT * FROM "AppCheckpoints" ORDER BY "createdAt" DESC LIMIT 1');
+    const rows = await this.sql.unsafe<AppCheckpointRow[]>('SELECT * FROM "AppCheckpoints" ORDER BY "createdAt" DESC, "id" DESC LIMIT 1');
     return rows.length > 0 ? rows[0]! : null;
   }
 

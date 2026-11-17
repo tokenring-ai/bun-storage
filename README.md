@@ -376,6 +376,7 @@ List filter building (parameterized WHERE/ORDER/LIMIT clauses over fixed column 
 | `name`       | `text`     | `text`  | `text`     | Checkpoint name                 |
 | `state`      | `text`     | `text`  | `text`     | JSON-serialized state payload   |
 | `createdAt`  | `integer`  | `bigint`| `bigint`   | Unix timestamp (ms)             |
+| `parentAgentId` | `text`  | `text`  | `text`     | Parent agent of a sub-agent; null otherwise. Added on start to databases created without it |
 
 **AppCheckpoints** — app session checkpoint rows.
 

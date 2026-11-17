@@ -91,6 +91,63 @@ describe("BunAgentStateStorage - SQLite (Bun Required)", () => {
       expect(retrieved?.state).toEqual(checkpoint.state);
       expect(retrieved?.sessionId).toBe(checkpoint.sessionId);
       expect(retrieved?.agentType).toBe(checkpoint.agentType);
+      expect(retrieved?.parentAgentId).toBeNull();
+    });
+
+    it("keeps a sub-agent checkpoint's parent", async () => {
+      const id = await storage.storeAgentCheckpoint({
+        agentId: "child-1",
+        parentAgentId: "parent-1",
+        sessionId: "session-1",
+        agentType: "general",
+        name: "child",
+        state: {},
+        createdAt: Date.now(),
+      });
+      expect((await storage.retrieveAgentCheckpoint(id))?.parentAgentId).toBe("parent-1");
+    });
+
+    it("adds the parent column to a database created before it existed", async () => {
+      const oldDbPath = "./test-agent-old-schema.db";
+      const { unlinkSync, existsSync } = await import("node:fs");
+      if (existsSync(oldDbPath)) unlinkSync(oldDbPath);
+      const { Database } = await import("bun:sqlite");
+      const old = new Database(oldDbPath);
+      old.run(
+        'CREATE TABLE "AgentCheckpoints" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "sessionId" text NOT NULL, "agentId" text NOT NULL, "agentType" text NOT NULL, "name" text NOT NULL, "state" text NOT NULL, "createdAt" integer NOT NULL)',
+      );
+      old.run(
+        'INSERT INTO "AgentCheckpoints" ("sessionId", "agentId", "agentType", "name", "state", "createdAt") VALUES (\'s\', \'old-agent\', \'general\', \'old\', \'{}\', 1)',
+      );
+      old.close();
+
+      const { BunStorage } = await import("./BunStorage.js");
+      const upgraded = new BunStorage({ connectionString: `sqlite://${oldDbPath}` }, createTestingApp());
+      try {
+        await upgraded.start();
+        expect((await upgraded.retrieveAgentCheckpoint(1))?.parentAgentId).toBeNull();
+        const id = await upgraded.storeAgentCheckpoint({
+          agentId: "new",
+          parentAgentId: "p",
+          sessionId: "s",
+          agentType: "general",
+          name: "new",
+          state: {},
+          createdAt: 2,
+        });
+        expect((await upgraded.retrieveAgentCheckpoint(id))?.parentAgentId).toBe("p");
+      } finally {
+        await upgraded.stop();
+      }
+      // Starting again finds the column and leaves it alone.
+      const again = new BunStorage({ connectionString: `sqlite://${oldDbPath}` }, createTestingApp());
+      try {
+        await again.start();
+        expect((await again.retrieveAgentCheckpoint(2))?.parentAgentId).toBe("p");
+      } finally {
+        await again.stop();
+        if (existsSync(oldDbPath)) unlinkSync(oldDbPath);
+      }
     });
 
     it("should list checkpoints", async () => {
@@ -718,8 +775,25 @@ describe("BunAgentStateStorage - MySQL & PostgreSQL", () => {
 
       const missing = await storage.retrieveAgentCheckpoint(999_999_999);
       expect(missing).toBeNull();
+
+      expect(retrieved?.parentAgentId).toBeNull();
+      const childId = await storage.storeAgentCheckpoint({ ...sampleCheckpoint, agentId: "tc-child", parentAgentId: "tc-agent-1" });
+      expect((await storage.retrieveAgentCheckpoint(childId))?.parentAgentId).toBe("tc-agent-1");
+
+      // As a database from before the column existed: starting the storage adds it back.
+      const quote = connectionString.startsWith("mysql") ? "`" : '"';
+      await storage.sql.unsafe(`ALTER TABLE ${quote}AgentCheckpoints${quote} DROP COLUMN ${quote}parentAgentId${quote}`);
     } finally {
       await storage.stop();
+    }
+
+    const upgraded = new BunStorage({ connectionString }, createTestingApp());
+    try {
+      await upgraded.start();
+      const id = await upgraded.storeAgentCheckpoint({ ...sampleCheckpoint, agentId: "tc-child-2", parentAgentId: "tc-agent-1" });
+      expect((await upgraded.retrieveAgentCheckpoint(id))?.parentAgentId).toBe("tc-agent-1");
+    } finally {
+      await upgraded.stop();
     }
   }
 

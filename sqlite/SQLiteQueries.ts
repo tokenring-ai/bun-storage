@@ -16,12 +16,25 @@ export class SQLiteQueries {
         await this.sql.unsafe(trimmed);
       }
     }
+    // Databases created before sub-agent checkpoints recorded their parent.
+    const columns = await this.sql.unsafe<{ name: string }[]>('PRAGMA table_info("AgentCheckpoints")');
+    if (!columns.some(column => column.name === "parentAgentId")) {
+      await this.sql.unsafe('ALTER TABLE "AgentCheckpoints" ADD COLUMN "parentAgentId" text');
+    }
   }
 
-  async insertAgent(agentId: string, sessionId: string, name: string, agentType: string, state: string, createdAt: number): Promise<number> {
+  async insertAgent(
+    agentId: string,
+    sessionId: string,
+    name: string,
+    agentType: string,
+    state: string,
+    createdAt: number,
+    parentAgentId: string | null,
+  ): Promise<number> {
     const result = await this.sql.unsafe<{ lastInsertRowid: number }>(
-      'INSERT INTO "AgentCheckpoints" ("agentId", "sessionId", "name", "agentType", "state", "createdAt") VALUES ($1, $2, $3, $4, $5, $6)',
-      [agentId, sessionId, name, agentType, state, createdAt],
+      'INSERT INTO "AgentCheckpoints" ("agentId", "sessionId", "name", "agentType", "state", "createdAt", "parentAgentId") VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [agentId, sessionId, name, agentType, state, createdAt, parentAgentId],
     );
     return Number(result.lastInsertRowid);
   }
@@ -73,7 +86,7 @@ export class SQLiteQueries {
   }
 
   async latestApp(): Promise<AppCheckpointRow | null> {
-    const rows = await this.sql.unsafe<AppCheckpointRow[]>('SELECT * FROM "AppCheckpoints" ORDER BY "createdAt" DESC LIMIT 1');
+    const rows = await this.sql.unsafe<AppCheckpointRow[]>('SELECT * FROM "AppCheckpoints" ORDER BY "createdAt" DESC, "id" DESC LIMIT 1');
     return rows.length > 0 ? rows[0]! : null;
   }
 

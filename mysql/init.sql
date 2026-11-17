@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS `AgentCheckpoints`
  `agentType` text                  NOT NULL,
  `state`     text                  NOT NULL,
  `createdAt` bigint                NOT NULL,
+ `parentAgentId` text              NULL,
  CONSTRAINT `AgentCheckpoints_id` PRIMARY KEY (`id`)
 );
 

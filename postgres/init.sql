@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS "AgentCheckpoints"
  "state"     text                  NOT NULL,
  "createdAt" bigint                NOT NULL
 );
+
+ALTER TABLE "AgentCheckpoints" ADD COLUMN IF NOT EXISTS "parentAgentId" text;
+
 CREATE TABLE IF NOT EXISTS "AppCheckpoints"
 (
  "id"               bigserial PRIMARY KEY NOT NULL,

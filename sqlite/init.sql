@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS "AgentCheckpoints"
  "agentType" text                              NOT NULL,
  "name"      text                              NOT NULL,
  "state"     text                              NOT NULL,
- "createdAt" integer                           NOT NULL
+ "createdAt" integer                           NOT NULL,
+ "parentAgentId" text
 );
 
 CREATE TABLE IF NOT EXISTS "AppCheckpoints"

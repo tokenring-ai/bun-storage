@@ -43,6 +43,8 @@ export type AgentCheckpointRow = {
   id: number | string | bigint;
   sessionId: string;
   agentId: string;
+  /** Null for top-level agents and for checkpoints saved before the column existed. */
+  parentAgentId?: string | null;
   name: string;
   agentType: string;
   state: string | Record<string, unknown>;
@@ -213,6 +215,9 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
     }
   }
 
+  /** Other services (the app checkpoint, for one) save their final state here while they stop. */
+  readonly stopsLast = true;
+
   async stop() {
     if (this.closed) return;
     this.closed = true;
@@ -353,6 +358,7 @@ export class BunStorage implements TokenRingService, AgentCheckpointStorage, App
       checkpoint.agentType,
       JSON.stringify(checkpoint.state),
       checkpoint.createdAt,
+      checkpoint.parentAgentId ?? null,
     );
     return StoredAgentCheckpointSchema.shape.id.parse(id);
   }

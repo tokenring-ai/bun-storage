@@ -16,12 +16,27 @@ export class MySQLQueries {
         await this.sql.unsafe(trimmed);
       }
     }
+    // Databases created before sub-agent checkpoints recorded their parent (MySQL has no ADD COLUMN IF NOT EXISTS).
+    const columns = await this.sql.unsafe<{ count: number | string | bigint }[]>(
+      "SELECT COUNT(*) AS `count` FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'AgentCheckpoints' AND COLUMN_NAME = 'parentAgentId'",
+    );
+    if (Number(columns[0]?.count ?? 0) === 0) {
+      await this.sql.unsafe("ALTER TABLE `AgentCheckpoints` ADD COLUMN `parentAgentId` text NULL");
+    }
   }
 
-  async insertAgent(agentId: string, sessionId: string, name: string, agentType: string, state: string, createdAt: number): Promise<number> {
+  async insertAgent(
+    agentId: string,
+    sessionId: string,
+    name: string,
+    agentType: string,
+    state: string,
+    createdAt: number,
+    parentAgentId: string | null,
+  ): Promise<number> {
     const result = await this.sql.unsafe<{ lastInsertRowid: number }>(
-      "INSERT INTO `AgentCheckpoints` (`agentId`, `sessionId`, `name`, `agentType`, `state`, `createdAt`) VALUES (?, ?, ?, ?, ?, ?)",
-      [agentId, sessionId, name, agentType, state, createdAt],
+      "INSERT INTO `AgentCheckpoints` (`agentId`, `sessionId`, `name`, `agentType`, `state`, `createdAt`, `parentAgentId`) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [agentId, sessionId, name, agentType, state, createdAt, parentAgentId],
     );
     return Number(result.lastInsertRowid);
   }
@@ -73,7 +88,7 @@ export class MySQLQueries {
   }
 
   async latestApp(): Promise<AppCheckpointRow | null> {
-    const rows = await this.sql.unsafe<AppCheckpointRow[]>("SELECT * FROM `AppCheckpoints` ORDER BY `createdAt` DESC LIMIT 1");
+    const rows = await this.sql.unsafe<AppCheckpointRow[]>("SELECT * FROM `AppCheckpoints` ORDER BY `createdAt` DESC, `id` DESC LIMIT 1");
     return rows.length > 0 ? rows[0]! : null;
   }
 
